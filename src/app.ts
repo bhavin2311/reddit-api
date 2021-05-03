@@ -6,8 +6,12 @@ import { MikroORM } from "@mikro-orm/core";
 // import { Post } from "./entities/Post";
 import microConfig from "./mikro-orm.config";
 import express from "express";
+import redis from "redis";
+import session from "express-session";
+import connectRedis from "connect-redis";
 import { ApolloServer } from "apollo-server-express";
 import { buildSchema } from "type-graphql";
+import { UserResolver } from "./resolvers/User";
 // import * as http from 'http';
 // import * as winston from 'winston';
 // import * as expressWinston from 'express-winston';
@@ -15,19 +19,44 @@ import { buildSchema } from "type-graphql";
 // import {CommonRoutesConfig} from './common/common.routes.config';
 // import {UsersRoutes} from './users/users.routes.config';
 // import debug from 'debug';
-
+declare module "express-session" {
+	interface SessionData {
+		userId: number;
+	}
+}
 const main = async () => {
 	const orm = await MikroORM.init(microConfig);
 	await orm.getMigrator().up();
 
-	const app: express.Application = express();
+	const app = express();
 
+	const RedisStore = connectRedis(session);
+	const redisClient = redis.createClient();
+
+	app.use(
+		session({
+			name: "qid",
+			store: new RedisStore({
+				client: redisClient,
+				disableTouch: true
+			}),
+			cookie: {
+				maxAge: 1000 * 60 * 60 * 24 * 365 * 10, //10 year
+				httpOnly: true,
+				sameSite: "lax",
+				secure: __prod__
+			},
+			secret: "addasdasdsadasffdsfs",
+			saveUninitialized: false,
+			resave: false
+		})
+	);
 	const apolloServer = new ApolloServer({
 		schema: await buildSchema({
-			resolvers: [HelloResolver, PostResolver],
+			resolvers: [HelloResolver, PostResolver, UserResolver],
 			validate: false
 		}),
-		context: () => ({ em: orm.em })
+		context: ({ req, res }) => ({ em: orm.em, req, res })
 	});
 	apolloServer.applyMiddleware({ app });
 	app.listen(process.env.NODE_ENV || 4000, () => {
